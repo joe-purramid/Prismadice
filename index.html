@@ -1116,7 +1116,7 @@ function startGame() {
         purple: { value: 0, locked: false },
       },
       rainbow: { value: 0 },
-      selectedCategory: null,
+      selectedCategory: '',
       scoreConfirmed: false,
       colorConfirmed: false
     },
@@ -1135,7 +1135,7 @@ function startGame() {
         purple: [false,false,false,false,false,false]
       }
     };
-    CATEGORIES.forEach(cat => { initState.scores[pid].dice[cat] = null; });
+    CATEGORIES.forEach(cat => { initState.scores[pid].dice[cat] = -1; });
   });
 
   gameRef.set(initState);
@@ -1260,7 +1260,7 @@ function renderScorecard() {
   const pid = viewingPlayer;
   if (!pid || !gameState.scores[pid]) return;
 
-  const scores = gameState.scores[pid].dice;
+  const scores = gameState.scores[pid].dice || {};
   const isMe = pid === myPlayerId;
   const turn = gameState.turn;
   const inScoringPhase = isMe && isMyTurn() && turn?.phase === 'scoring';
@@ -1275,7 +1275,7 @@ function renderScorecard() {
     if (!row || !valueEl) return;
 
     const scored = scores[cat];
-    if (scored !== null && scored !== undefined) {
+    if (scored !== undefined && scored !== -1) {
       valueEl.textContent = scored;
       valueEl.className = `score-value ${scored === 0 ? 'zero' : 'scored'}`;
       row.className = 'score-row used';
@@ -1294,7 +1294,7 @@ function renderScorecard() {
   });
 
   const upperSum = ['ones','twos','threes','fours','fives','sixes']
-    .reduce((sum, cat) => sum + (scores[cat] || 0), 0);
+    .reduce((sum, cat) => sum + (scores[cat] >= 0 ? scores[cat] : 0), 0);
   const bonusEl = document.getElementById('sc-upper-bonus');
   if (upperSum >= 63) { bonusEl.textContent = '+35'; bonusEl.style.color = 'var(--gold)'; }
   else if (upperSum >= 55) { bonusEl.textContent = '+20'; bonusEl.style.color = 'var(--green)'; }
@@ -1307,7 +1307,7 @@ function renderColorChart() {
   const pid = viewingPlayer;
   if (!pid || !gameState.scores[pid]) return;
 
-  const chart = gameState.scores[pid].colorChart;
+  const chart = gameState.scores[pid].colorChart || {};
   const isMe = pid === myPlayerId;
   const turn = gameState.turn;
   const inColorPhase = isMe && isMyTurn() && turn?.phase === 'color';
@@ -1328,10 +1328,12 @@ function renderColorChart() {
   for (let n = 1; n <= 6; n++) html += `<div class="chart-header-cell">${n}</div>`;
   html += '<div style="width:40px;"></div></div>';
 
+  const defaultRow = [false,false,false,false,false,false];
   COLORS.forEach(color => {
+    const row = chart[color] || defaultRow;
     html += `<div class="chart-row"><div class="chart-row-label" style="color:var(--${color})">${color}</div>`;
     for (let n = 0; n < 6; n++) {
-      const crossed = chart[color][n];
+      const crossed = row[n];
       const isSelected = selectedCrossoffs.some(c => c.color === color && c.number === n);
       let cls = 'chart-cell';
       if (crossed) cls += ' crossed';
@@ -1341,12 +1343,12 @@ function renderColorChart() {
       const click = inColorPhase && !crossed ? `onclick="toggleCrossoff('${color}', ${n})"` : '';
       html += `<div class="${cls}" ${click}>${crossed ? '' : (n + 1)}</div>`;
     }
-    html += `<div class="chart-row-score">${calculateRowScore(chart[color]) || ''}</div></div>`;
+    html += `<div class="chart-row-score">${calculateRowScore(row) || ''}</div></div>`;
   });
 
   html += '<div class="chart-column-scores">';
   for (let n = 0; n < 6; n++) {
-    html += `<div class="chart-col-score">${COLORS.every(c => chart[c][n]) ? '25' : ''}</div>`;
+    html += `<div class="chart-col-score">${COLORS.every(c => (chart[c] || defaultRow)[n]) ? '25' : ''}</div>`;
   }
   html += '<div style="width:40px;"></div></div>';
   chartDiv.innerHTML = html;
@@ -1502,7 +1504,8 @@ function calculateCategoryScore(cat, diceVals) {
 
 function selectCategory(cat) {
   if (!isMyTurn() || gameState.turn?.phase !== 'scoring') return;
-  if (gameState.scores[myPlayerId].dice[cat] !== null) return;
+  const scores = gameState.scores[myPlayerId]?.dice || {};
+  if (scores[cat] !== undefined && scores[cat] !== -1) return;
   selectedCategory = (selectedCategory === cat) ? null : cat;
   renderScorecard();
   renderControls();
@@ -1527,13 +1530,17 @@ function confirmScore() {
 // ==========================================
 function canSelectCrossoff(color, number) {
   if (!isMyTurn() || gameState.turn?.phase !== 'color') return false;
-  if (gameState.scores[myPlayerId].colorChart[color][number]) return false;
+  const chart = gameState.scores[myPlayerId]?.colorChart || {};
+  const row = chart[color] || [false,false,false,false,false,false];
+  if (row[number]) return false;
   return gameState.turn.dice[color].value === number + 1;
 }
 
 function toggleCrossoff(color, number) {
   if (!isMyTurn() || gameState.turn?.phase !== 'color') return;
-  if (gameState.scores[myPlayerId].colorChart[color][number]) return;
+  const chart = gameState.scores[myPlayerId]?.colorChart || {};
+  const row = chart[color] || [false,false,false,false,false,false];
+  if (row[number]) return;
 
   const idx = selectedCrossoffs.findIndex(c => c.color === color && c.number === number);
   if (idx >= 0) {
@@ -1604,7 +1611,7 @@ function endTurn() {
         purple: { value: 0, locked: false },
       },
       rainbow: { value: 0 },
-      selectedCategory: null, scoreConfirmed: false, colorConfirmed: false
+      selectedCategory: '', scoreConfirmed: false, colorConfirmed: false
     }
   });
   viewingPlayer = myPlayerId;
@@ -1622,20 +1629,20 @@ function calculateRowScore(row) {
 
 function calculateTotalScore(pid) {
   if (!gameState.scores[pid]) return 0;
-  const scores = gameState.scores[pid].dice;
-  const chart = gameState.scores[pid].colorChart;
+  const scores = gameState.scores[pid].dice || {};
+  const chart = gameState.scores[pid].colorChart || {};
 
   let total = 0;
-  CATEGORIES.forEach(cat => { if (scores[cat] != null) total += scores[cat]; });
+  CATEGORIES.forEach(cat => { if (scores[cat] !== undefined && scores[cat] !== -1) total += scores[cat]; });
 
   const upperSum = ['ones','twos','threes','fours','fives','sixes']
-    .reduce((sum, cat) => sum + (scores[cat] || 0), 0);
+    .reduce((sum, cat) => sum + (scores[cat] >= 0 ? scores[cat] : 0), 0);
   if (upperSum >= 63) total += 35;
   else if (upperSum >= 55) total += 20;
 
-  COLORS.forEach(color => { total += calculateRowScore(chart[color]); });
+  COLORS.forEach(color => { total += calculateRowScore(chart[color] || [false,false,false,false,false,false]); });
   for (let n = 0; n < 6; n++) {
-    if (COLORS.every(c => chart[c][n])) total += 25;
+    if (COLORS.every(c => (chart[c] || [])[n])) total += 25;
   }
   return total;
 }
